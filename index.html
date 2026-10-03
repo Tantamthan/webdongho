@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Đồng hồ báo thức ESP32</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;700&family=VT323&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #E8ECF0;
+    --surface: #FFFFFF;
+    --ink: #18212C;
+    --muted: #586474;
+    --line: #CBD3DC;
+    --accent: #1E6B47;
+    --accent-ink: #FFFFFF;
+    --danger: #C23B3B;
+    --pcb: #1D4F8F;
+    --pcb-edge: #163E72;
+    --glass: #03060A;
+    --px-yellow: #F4D44B;
+    --px-cyan: #72D4FF;
+    --font: "Be Vietnam Pro", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    --pixel: "VT323", ui-monospace, "Courier New", monospace;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0E1318;
+      --surface: #171F27;
+      --ink: #E4EAF0;
+      --muted: #94A1AE;
+      --line: #2B3641;
+      --accent: #3BAA74;
+      --accent-ink: #06130C;
+      --danger: #E25C5C;
+      --pcb: #1A4378;
+      --pcb-edge: #11305A;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0E1318;
+    --surface: #171F27;
+    --ink: #E4EAF0;
+    --muted: #94A1AE;
+    --line: #2B3641;
+    --accent: #3BAA74;
+    --accent-ink: #06130C;
+    --danger: #E25C5C;
+    --pcb: #1A4378;
+    --pcb-edge: #11305A;
+    color-scheme: dark;
+  }
+
+  :root {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  html { scroll-padding-top: env(safe-area-inset-top, 0px); }
+  *, *::before, *::after { box-sizing: inherit; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 16px;
+    line-height: 1.5;
+  }
+  main {
+    max-width: 30rem;
+    margin: 0 auto;
+    padding: 1rem 1rem 2.5rem;
+  }
+
+  .top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    margin-bottom: 1rem;
+  }
+  h1 { font-size: 1.25rem; font-weight: 700; margin: 0; letter-spacing: -.01em; }
+  .pill {
+    font-size: .8125rem;
+    padding: .25rem .625rem;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .pill[data-state="on"] { border-color: var(--accent); color: var(--accent); }
+  .pill[data-state="busy"] { color: var(--ink); }
+
+  /* Bản sao module OLED: điểm nhấn duy nhất của trang */
+  .module {
+    position: relative;
+    background: var(--pcb);
+    border: 2px solid var(--pcb-edge);
+    border-radius: 6px;
+    padding: 1.25rem 1.1rem 1.1rem;
+  }
+  .module::before, .module::after,
+  .module .holes::before, .module .holes::after {
+    content: "";
+    position: absolute;
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--bg);
+    box-shadow: 0 0 0 2px #C9A44A;
+  }
+  .module::before { top: 6px; left: 6px; }
+  .module::after { top: 6px; right: 6px; }
+  .module .holes::before { bottom: 6px; left: 6px; }
+  .module .holes::after { bottom: 6px; right: 6px; }
+
+  .oled {
+    background: var(--glass);
+    border-radius: 2px;
+    aspect-ratio: 2 / 1;
+    display: grid;
+    grid-template-rows: 25% 1fr auto auto;
+    padding: 2% 3%;
+    font-family: var(--pixel);
+    color: var(--px-cyan);
+    text-shadow: 0 0 6px rgba(114, 212, 255, .35);
+    overflow: hidden;
+  }
+  .oled-top {
+    color: var(--px-yellow);
+    text-shadow: 0 0 6px rgba(244, 212, 75, .35);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: clamp(1rem, 5.2vw, 1.5rem);
+    border-bottom: 1px solid currentColor;
+  }
+  .oled-time {
+    font-size: clamp(2.6rem, 15vw, 4.4rem);
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    letter-spacing: .02em;
+  }
+  .oled-env, .oled-alarm {
+    font-size: clamp(1rem, 5.2vw, 1.5rem);
+    line-height: 1.15;
+  }
+  .oled-env { display: flex; gap: 1.5em; border-bottom: 1px solid currentColor; }
+  .oled.idle { color: #2C5568; text-shadow: none; }
+  .oled.idle .oled-top { color: #6B5E22; text-shadow: none; }
+  .blink { animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { visibility: hidden; } }
+
+  .connect {
+    margin-top: .875rem;
+    width: 100%;
+  }
+
+  button {
+    font: inherit;
+    font-weight: 500;
+    border-radius: 10px;
+    padding: .75rem 1rem;
+    border: 1px solid transparent;
+    cursor: pointer;
+    min-height: 48px;
+  }
+  button:focus-visible, input:focus-visible, summary:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .primary { background: var(--accent); color: var(--accent-ink); }
+  .secondary { background: transparent; color: var(--ink); border-color: var(--line); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+
+  .ring {
+    margin-top: 1rem;
+    background: var(--danger);
+    color: #fff;
+    border-radius: 10px;
+    padding: .75rem .75rem .75rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .75rem;
+    font-weight: 700;
+  }
+  .ring button { background: #fff; color: var(--danger); }
+
+  fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+  fieldset:disabled .panel { opacity: .55; }
+
+  .panel {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 1rem;
+    margin-top: 1rem;
+  }
+  h2 { font-size: 1.0625rem; margin: 0 0 .75rem; font-weight: 700; }
+
+  input[type="time"], input[type="date"] {
+    font: inherit;
+    color: var(--ink);
+    background: var(--bg);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: .625rem .75rem;
+    min-height: 48px;
+    width: 100%;
+  }
+  .alarm-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: .75rem;
+    align-items: center;
+    margin-bottom: .75rem;
+  }
+  #alarmTime { font-size: 1.75rem; font-weight: 500; padding: .375rem .75rem; }
+
+  .switch { display: inline-flex; align-items: center; gap: .5rem; cursor: pointer; user-select: none; }
+  .switch input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .switch .track {
+    width: 52px; height: 30px; border-radius: 999px;
+    background: var(--line);
+    position: relative;
+    transition: background .15s;
+  }
+  .switch .track::after {
+    content: ""; position: absolute; top: 3px; left: 3px;
+    width: 24px; height: 24px; border-radius: 50%;
+    background: #fff;
+    transition: transform .15s;
+  }
+  .switch input:checked + .track { background: var(--accent); }
+  .switch input:checked + .track::after { transform: translateX(22px); }
+  .switch input:focus-visible + .track { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .switch-label { font-size: .9375rem; min-width: 2.2em; }
+
+  .full { width: 100%; }
+  .hint { color: var(--muted); font-size: .9375rem; margin: 0 0 .75rem; }
+  .hint strong { color: var(--ink); font-weight: 500; font-variant-numeric: tabular-nums; }
+  .drift { color: var(--danger); }
+
+  details.manual { margin-top: .875rem; border-top: 1px solid var(--line); padding-top: .75rem; }
+  summary { cursor: pointer; color: var(--muted); font-size: .9375rem; }
+  .manual-grid { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin: .75rem 0; }
+
+  .notice {
+    margin-top: 1rem;
+    padding: .875rem 1rem;
+    border-radius: 10px;
+    border: 1px solid var(--danger);
+    color: var(--ink);
+    font-size: .9375rem;
+  }
+
+  details.log { margin-top: 1.25rem; }
+  #log {
+    list-style: none; margin: .5rem 0 0; padding: 0;
+    font-size: .875rem; color: var(--muted);
+    max-height: 12rem; overflow-y: auto;
+  }
+  #log li { padding: .25rem 0; border-bottom: 1px solid var(--line); }
+  #log li.err { color: var(--danger); }
+  #log time { font-variant-numeric: tabular-nums; margin-right: .5rem; }
+
+  .toast {
+    position: fixed;
+    left: 50%;
+    bottom: 0;
+    transform: translate(-50%, 0);
+    margin-bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
+    background: var(--ink);
+    color: var(--bg);
+    padding: .625rem 1rem;
+    border-radius: 10px;
+    font-size: .9375rem;
+    max-width: calc(100% - 2rem);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity .2s;
+  }
+  .toast.show { opacity: 1; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .blink { animation: none; }
+    .switch .track, .switch .track::after, .toast { transition: none; }
+  }
+</style>
+</head>
+<body>
+<main>
+  <header class="top">
+    <h1>Đồng hồ báo thức</h1>
+    <span class="pill" id="connPill" data-state="off">Chưa kết nối</span>
+  </header>
+
+  <section class="module" aria-label="Màn hình đồng hồ">
+    <span class="holes" aria-hidden="true"></span>
+    <div class="oled idle" id="oled" aria-live="off">
+      <div class="oled-top"><span id="oDate">-- --/--/----</span><span id="oBle"></span></div>
+      <div class="oled-time" id="oTime">--:--:--</div>
+      <div class="oled-env"><span id="oTemp">T: --.-°C</span><span id="oHum">H: --%</span></div>
+      <div class="oled-alarm" id="oAlarm">Bao thuc --:--</div>
+    </div>
+  </section>
+
+  <button class="primary connect" id="btnConnect">Kết nối đồng hồ</button>
+
+  <div class="notice" id="unsupported" hidden></div>
+
+  <div class="ring" id="ringBar" role="alert" hidden>
+    <span>Báo thức đang reo</span>
+    <button id="btnStop">Tắt chuông</button>
+  </div>
+
+  <fieldset id="controls" disabled>
+    <section class="panel">
+      <h2>Báo thức</h2>
+      <div class="alarm-row">
+        <input type="time" id="alarmTime" value="06:30" aria-label="Giờ báo thức">
+        <label class="switch">
+          <input type="checkbox" id="alarmOn">
+          <span class="track" aria-hidden="true"></span>
+          <span class="switch-label" id="alarmOnLabel">Tắt</span>
+        </label>
+      </div>
+      <button class="primary full" id="btnSaveAlarm">Lưu giờ báo thức</button>
+    </section>
+
+    <section class="panel">
+      <h2>Ngày giờ</h2>
+      <p class="hint">Giờ điện thoại: <strong id="phoneClock">--:--:--</strong></p>
+      <p class="hint" id="driftHint" hidden></p>
+      <button class="primary full" id="btnSync">Lấy giờ điện thoại</button>
+
+      <details class="manual">
+        <summary>Tự nhập ngày giờ khác</summary>
+        <div class="manual-grid">
+          <input type="date" id="setDate" aria-label="Ngày">
+          <input type="time" id="setTime" step="1" aria-label="Giờ">
+        </div>
+        <button class="secondary full" id="btnSetManual">Gửi ngày giờ này</button>
+      </details>
+    </section>
+  </fieldset>
+
+  <details class="log">
+    <summary>Nhật ký kết nối</summary>
+    <ol id="log"></ol>
+  </details>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+(() => {
+  const NUS = '6e400001-b5a3-f393-e0a9-e50e24dcca9e';
+  const RX  = '6e400002-b5a3-f393-e0a9-e50e24dcca9e';
+  const TX  = '6e400003-b5a3-f393-e0a9-e50e24dcca9e';
+  const NAME_PREFIX = 'ESP32-DongHo';
+  const DOW = ['CN', 'T2', 'T3', 'T4', 'T5', 'T6', 'T7'];
+
+  const $ = id => document.getElementById(id);
+  const enc = new TextEncoder();
+  const dec = new TextDecoder();
+
+  let device = null, rxChar = null, inBuf = '';
+  let writeChain = Promise.resolve();
+  let alarmDirty = false;        // người dùng đang sửa giờ báo thức, chưa lưu
+  let togglePending = false;
+
+  const pad = n => String(n).padStart(2, '0');
+
+  // ---------- Nhật ký & thông báo ----------
+  function log(msg, cls) {
+    const li = document.createElement('li');
+    if (cls) li.className = cls;
+    const d = new Date();
+    li.innerHTML = `<time>${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}</time>`;
+    li.appendChild(document.createTextNode(msg));
+    $('log').prepend(li);
+  }
+  let toastTimer;
+  function toast(msg) {
+    const t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('show'), 2200);
+  }
+
+  // Tin nhắn từ ESP32 (không dấu) -> câu hiển thị có dấu
+  const MSG = {
+    'Da chinh ngay gio': 'Đã chỉnh ngày giờ',
+    'Da bat bao thuc': 'Đã bật báo thức',
+    'Da tat bao thuc': 'Đã tắt báo thức',
+    'Da tat chuong': 'Đã tắt chuông'
+  };
+  function niceMsg(m) {
+    if (MSG[m]) return MSG[m];
+    const r = m.match(/^Da dat bao thuc (\d\d:\d\d)$/);
+    if (r) return `Đã đặt báo thức ${r[1]}`;
+    return m;
+  }
+
+  // ---------- Trạng thái kết nối ----------
+  function setConn(state) {
+    const pill = $('connPill'), btn = $('btnConnect');
+    if (state === 'on') {
+      pill.textContent = 'Đã kết nối';
+      pill.dataset.state = 'on';
+      btn.hidden = true;
+      $('controls').disabled = false;
+      $('oled').classList.remove('idle');
+      $('oBle').textContent = 'BLE';
+    } else if (state === 'busy') {
+      pill.textContent = 'Đang kết nối…';
+      pill.dataset.state = 'busy';
+      btn.disabled = true;
+    } else {
+      pill.textContent = 'Chưa kết nối';
+      pill.dataset.state = 'off';
+      btn.hidden = false;
+      btn.disabled = false;
+      $('controls').disabled = true;
+      $('oled').classList.add('idle');
+      $('oBle').textContent = '';
+      $('ringBar').hidden = true;
+      $('driftHint').hidden = true;
+    }
+  }
+
+  // ---------- Kết nối BLE ----------
+  async function connect() {
+    try {
+      if (!device) {
+        device = await navigator.bluetooth.requestDevice({
+          filters: [{ namePrefix: NAME_PREFIX }],
+          optionalServices: [NUS]
+        });
+        device.addEventListener('gattserverdisconnected', onDisconnected);
+      }
+      setConn('busy');
+      log(`Đang kết nối ${device.name || NAME_PREFIX}`);
+      const server = await device.gatt.connect();
+      const svc = await server.getPrimaryService(NUS);
+      rxChar = await svc.getCharacteristic(RX);
+      const txChar = await svc.getCharacteristic(TX);
+      await txChar.startNotifications();
+      txChar.addEventListener('characteristicvaluechanged', onData);
+      inBuf = '';
+      setConn('on');
+      log('Đã kết nối');
+      send('GET');
+    } catch (e) {
+      rxChar = null;
+      setConn('off');
+      if (e.name === 'NotFoundError') {
+        // người dùng bấm Huỷ trong hộp chọn thiết bị
+        if (!/cancel/i.test(e.message)) log('Không tìm thấy đồng hồ. Kiểm tra ESP32 đã bật và đang phát BLE.', 'err');
+        device = null;
+        return;
+      }
+      if (e.name === 'SecurityError') {
+        showNotice('Trang này đang bị chặn quyền Bluetooth. Hãy mở file dong-ho-ble.html từ một địa chỉ https riêng (ví dụ GitHub Pages) bằng Chrome.');
+      }
+      log(`Kết nối lỗi: ${e.message}`, 'err');
+      toast('Kết nối không thành công, thử lại nhé');
+    }
+  }
+
+  function onDisconnected() {
+    rxChar = null;
+    setConn('off');
+    $('btnConnect').textContent = 'Kết nối lại';
+    log('Mất kết nối với đồng hồ', 'err');
+  }
+
+  // ---------- Gửi lệnh: chia gói 20 byte, gửi lần lượt ----------
+  function send(cmd) {
+    if (!rxChar) { toast('Chưa kết nối đồng hồ'); return Promise.resolve(); }
+    const bytes = enc.encode(cmd + '\n');
+    log(`Gửi: ${cmd}`);
+    writeChain = writeChain.then(async () => {
+      for (let i = 0; i < bytes.length; i += 20) {
+        const part = bytes.slice(i, i + 20);
+        if (rxChar.writeValueWithResponse) await rxChar.writeValueWithResponse(part);
+        else await rxChar.writeValue(part);
+      }
+    }).catch(e => log(`Gửi lỗi: ${e.message}`, 'err'));
+    return writeChain;
+  }
+
+  // ---------- Nhận dữ liệu ----------
+  function onData(ev) {
+    inBuf += dec.decode(ev.target.value);
+    let idx;
+    while ((idx = inBuf.indexOf('\n')) >= 0) {
+      const line = inBuf.slice(0, idx).trim();
+      inBuf = inBuf.slice(idx + 1);
+      if (line) handleLine(line);
+    }
+    if (inBuf.length > 300) inBuf = '';
+  }
+
+  function handleLine(line) {
+    const p = line.split('|');
+    if (p[0] === 'S' && p.length >= 8) {
+      updateStatus(p);
+    } else if (p[0] === 'M') {
+      const m = niceMsg(p.slice(1).join('|'));
+      log(m);
+      toast(m);
+    }
+  }
+
+  function updateStatus([, date, time, alarm, on, t, h, ring]) {
+    const [y, mo, d] = date.split('-').map(Number);
+    const dow = DOW[new Date(y, mo - 1, d).getDay()];
+    $('oDate').textContent = `${dow} ${pad(d)}/${pad(mo)}/${y}`;
+    $('oTime').textContent = time;
+    $('oTemp').textContent = t === '-' ? 'T: --.-°C' : `T: ${t}°C`;
+    $('oHum').textContent = h === '-' ? 'H: --%' : `H: ${h}%`;
+
+    const ringing = ring === '1';
+    const oA = $('oAlarm');
+    if (ringing) {
+      oA.textContent = '!!! BAO THUC !!!';
+      oA.classList.add('blink');
+    } else {
+      oA.textContent = `Bao thuc ${alarm} ${on === '1' ? 'BAT' : 'TAT'}`;
+      oA.classList.remove('blink');
+    }
+    $('ringBar').hidden = !ringing;
+
+    if (!alarmDirty && document.activeElement !== $('alarmTime')) $('alarmTime').value = alarm;
+    if (!togglePending) {
+      $('alarmOn').checked = on === '1';
+      $('alarmOnLabel').textContent = on === '1' ? 'Bật' : 'Tắt';
+    }
+
+    // So sánh giờ đồng hồ với giờ điện thoại
+    const [hh, mm, ss] = time.split(':').map(Number);
+    const dev = new Date(y, mo - 1, d, hh, mm, ss);
+    const diff = Math.round((dev - new Date()) / 1000);
+    const hint = $('driftHint');
+    if (Math.abs(diff) > 5) {
+      hint.hidden = false;
+      hint.innerHTML = `<span class="drift">Đồng hồ đang ${diff > 0 ? 'nhanh' : 'chậm'} ${fmtDiff(Math.abs(diff))} so với điện thoại.</span>`;
+    } else {
+      hint.hidden = true;
+    }
+  }
+
+  function fmtDiff(s) {
+    if (s < 60) return `${s} giây`;
+    if (s < 3600) return `${Math.round(s / 60)} phút`;
+    if (s < 86400) return `${Math.round(s / 3600)} giờ`;
+    return `${Math.round(s / 86400)} ngày`;
+  }
+
+  // ---------- Thao tác người dùng ----------
+  function fmtDateTime(d) {
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+           `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+
+  $('btnConnect').addEventListener('click', connect);
+  $('btnStop').addEventListener('click', () => send('STOP'));
+
+  $('alarmTime').addEventListener('input', () => { alarmDirty = true; });
+  $('btnSaveAlarm').addEventListener('click', async () => {
+    const v = $('alarmTime').value;
+    if (!/^\d\d:\d\d/.test(v)) { toast('Chọn giờ báo thức trước'); return; }
+    await send(`AL ${v.slice(0, 5)}`);
+    alarmDirty = false;
+  });
+
+  $('alarmOn').addEventListener('change', async e => {
+    togglePending = true;
+    $('alarmOnLabel').textContent = e.target.checked ? 'Bật' : 'Tắt';
+    await send(e.target.checked ? 'AL ON' : 'AL OFF');
+    setTimeout(() => { togglePending = false; }, 1500);
+  });
+
+  $('btnSync').addEventListener('click', () => {
+    // Gửi trước 0,5 giây để bù thời gian truyền
+    send(`SET ${fmtDateTime(new Date(Date.now() + 500))}`);
+  });
+
+  $('btnSetManual').addEventListener('click', () => {
+    const d = $('setDate').value, t = $('setTime').value;
+    if (!d || !t) { toast('Nhập đủ ngày và giờ'); return; }
+    const time = t.length === 5 ? `${t}:00` : t.slice(0, 8);
+    send(`SET ${d} ${time}`);
+  });
+
+  // ---------- Đồng hồ điện thoại & giá trị mặc định ----------
+  function tick() {
+    const d = new Date();
+    $('phoneClock').textContent = `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  }
+  tick();
+  setInterval(tick, 1000);
+  {
+    const d = new Date();
+    $('setDate').value = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    $('setTime').value = `${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+  }
+
+  // ---------- Kiểm tra trình duyệt ----------
+  function showNotice(msg) {
+    const n = $('unsupported');
+    n.textContent = msg;
+    n.hidden = false;
+  }
+  if (!('bluetooth' in navigator)) {
+    $('btnConnect').disabled = true;
+    showNotice('Trình duyệt này không dùng được Bluetooth. Hãy mở trang bằng Chrome trên điện thoại Android hoặc máy tính (Windows, macOS), và bật Bluetooth lên.');
+  }
+})();
+</script>
+</body>
+</html>
